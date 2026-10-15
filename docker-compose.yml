@@ -1,0 +1,148 @@
+services:
+  db:
+    image: postgres:15
+    container_name: aplus-db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7
+    container_name: aplus-redis
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    build: .
+    container_name: aplus-backend
+    command: >
+      bash -c "
+      python manage.py migrate &&
+      python manage.py collectstatic --noinput &&
+      python manage.py fill_plate_numbers &&
+      python manage.py sync_vehicles &&
+      daphne -b 0.0.0.0 -p 8000 aplus_backend.asgi:application
+      "
+    volumes:
+      - .:/app
+      - ./static:/app/static/
+      - ./media:/app/media/
+
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    build: .
+    container_name: aplus-worker
+    command: >
+      bash -c "
+      echo 'Waiting for backend...' &&
+      sleep 10 &&
+      python -m services.polling_worker
+      "
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_started
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery:
+    build: .
+    container_name: aplus-celery
+    command: celery -A aplus_backend worker -l info
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - backend
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery-beat:
+    build: .
+    container_name: aplus-celery-beat
+    command: celery -A aplus_backend beat -l info
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - backend
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: linuxserver/swag
+    restart: always
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Bishkek
+      - URL=aplus-dev.site
+      - SUBDOMAINS=www
+      - VALIDATION=http
+      - ONLY_SUBDOMAINS=true
+      - STAGING=false
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - lets:/config
+      - ./nginx/ssl.conf:/config/nginx/site-confs/ssl/ssl.conf
+      - ./nginx/nginx.conf:/config/nginx/site-confs/default.conf
+      - ./static:/app/static/
+      - ./media:/app/media/
+
+volumes:
+  postgres_data:
+  lets:

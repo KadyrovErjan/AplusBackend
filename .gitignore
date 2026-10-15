@@ -1,0 +1,28 @@
+# Кеши Python
+__pycache__/
+*.pyc
+*.pyo
+
+*/migrations/__pycache__/
+users/migrations/
+notifications/migrations/
+
+# Виртуальное окружение
+venv/
+.venv/
+env/
+ENV/
+
+# Прочее
+.idea/
+.env
+FETCH_HEAD
+db.sqlite3
+celerybeat-schedule
+media
+prompt.md
+
+certbot/
+media/
+static/
+docker-compose.local.yml
